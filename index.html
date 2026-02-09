@@ -493,9 +493,13 @@
     </main>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script>
     const canvas = document.getElementById("game");
-    const ctx = canvas.getContext("2d");
+    let renderer;
+    let scene;
+    let camera;
+    let ground;
     const menuScreen = document.getElementById("menu-screen");
     const selectScreen = document.getElementById("select-screen");
     const gameOverScreen = document.getElementById("game-over-screen");
@@ -668,10 +672,42 @@
 
     function resizeCanvas() {
       const { width, height } = canvas.getBoundingClientRect();
-      canvas.width = width * devicePixelRatio;
-      canvas.height = height * devicePixelRatio;
-      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      if (!renderer) return;
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
       syncPanels();
+    }
+
+    function initThree() {
+      const { width, height } = canvas.getBoundingClientRect();
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(width, height, false);
+      renderer.shadowMap.enabled = true;
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0b0f1d);
+      camera = new THREE.PerspectiveCamera(60, width / height, 1, 5000);
+      camera.position.set(0, 900, 900);
+      camera.lookAt(0, 0, 0);
+
+      const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambient);
+      const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+      dir.position.set(200, 600, 300);
+      dir.castShadow = true;
+      dir.shadow.mapSize.set(1024, 1024);
+      scene.add(dir);
+
+      const planeGeom = new THREE.PlaneGeometry(4000, 4000);
+      const planeMat = new THREE.MeshStandardMaterial({ color: 0x11182a });
+      ground = new THREE.Mesh(planeGeom, planeMat);
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      const grid = new THREE.GridHelper(4000, 40, 0x1b2340, 0x151d33);
+      scene.add(grid);
     }
 
     function syncPanels() {
@@ -816,8 +852,19 @@
       showScreen(null);
       gameState = "playing";
       resizeCanvas();
+      if (player && player.mesh) {
+        scene.remove(player.mesh);
+      }
       player = createPlayer(char);
+      player.mesh = createBoxMesh({ width: 28, height: 36, depth: 28, color: 0x4aa3ff });
+      scene.add(player.mesh);
       initResources();
+      zombies.forEach((z) => z.mesh && scene.remove(z.mesh));
+      bullets.forEach((b) => b.mesh && scene.remove(b.mesh));
+      structures.forEach((s) => s.mesh && scene.remove(s.mesh));
+      mines.forEach((m) => m.mesh && scene.remove(m.mesh));
+      turrets.forEach((t) => t.mesh && scene.remove(t.mesh));
+      factories.forEach((f) => f.mesh && scene.remove(f.mesh));
       zombies = [];
       bullets = [];
       structures = [];
@@ -846,13 +893,15 @@
       const placeX = player.x + player.aim.x * 60;
       const placeY = player.y + player.aim.y * 60;
       if (option.kind === "factory") {
-        factories.push({ id: option.id, x: placeX, y: placeY, timer: 0 });
+        const factory = { id: option.id, x: placeX, y: placeY, timer: 0 };
+        factory.mesh = createFactoryMesh(factory);
+        factories.push(factory);
         showToast(`Построен ${option.label}`);
         return;
       }
       if (option.kind === "turret") {
         const stats = TURRET_LEVELS[option.level];
-        turrets.push({
+        const turret = {
           x: placeX,
           y: placeY,
           fire: 0,
@@ -863,16 +912,24 @@
           range: stats.range,
           height: stats.height,
           color: stats.color
-        });
+        };
+        turret.mesh = createTurretMesh(turret);
+        turrets.push(turret);
       } else if (option.kind === "mine") {
-        mines.push({ x: placeX, y: placeY, radius: 36, armed: true });
+        const mine = { x: placeX, y: placeY, radius: 36, armed: true };
+        mine.mesh = createMineMesh(mine);
+        mines.push(mine);
       } else if (option.kind === "medstation") {
-        structures.push({ type: "medstation", x: placeX, y: placeY, hp: 110, maxHp: 110, height: 24 });
+        const station = { type: "medstation", x: placeX, y: placeY, hp: 110, maxHp: 110, height: 24 };
+        station.mesh = createStructureMesh(station);
+        structures.push(station);
       } else if (option.kind === "ammobox") {
-        structures.push({ type: "ammobox", x: placeX, y: placeY, hp: 100, maxHp: 100, height: 20 });
+        const box = { type: "ammobox", x: placeX, y: placeY, hp: 100, maxHp: 100, height: 20 };
+        box.mesh = createStructureMesh(box);
+        structures.push(box);
       } else {
         const stats = BARRICADE_LEVELS[option.level];
-        structures.push({
+        const barricade = {
           type: "barricade",
           level: option.level,
           x: placeX,
@@ -881,7 +938,9 @@
           maxHp: stats.maxHp,
           height: stats.height,
           color: stats.color
-        });
+        };
+        barricade.mesh = createStructureMesh(barricade);
+        structures.push(barricade);
       }
       showToast(`Постройка: ${option.label}`);
     }
@@ -959,7 +1018,7 @@
       const x = player.x + Math.cos(angle) * distance;
       const y = player.y + Math.sin(angle) * distance;
       if (type === "boss") {
-        zombies.push({
+        const boss = {
           type: "boss",
           x,
           y,
@@ -968,11 +1027,13 @@
           speed: 35,
           damage: 25,
           size: 40
-        });
+        };
+        boss.mesh = createZombieMesh(boss);
+        zombies.push(boss);
         return;
       }
       const config = zombieTypes[type];
-      zombies.push({
+      const zombie = {
         type,
         x,
         y,
@@ -985,7 +1046,9 @@
         stealth: config.stealth,
         ranged: config.ranged,
         explode: config.explode
-      });
+      };
+      zombie.mesh = createZombieMesh(zombie);
+      zombies.push(zombie);
     }
 
     function triggerAbility(index) {
@@ -1133,14 +1196,16 @@
         }
         if (z.ranged && distToPlayer < 260 && z.attackCooldown <= 0) {
           z.attackCooldown = 2.2;
-          bullets.push({
+          const spit = {
             x: z.x,
             y: z.y,
             vx: (dx / distToPlayer) * 220,
             vy: (dy / distToPlayer) * 220,
             damage: z.damage,
             fromZombie: true
-          });
+          };
+          spit.mesh = createBulletMesh(spit, true);
+          bullets.push(spit);
         }
         if (distToPlayer > 20) {
           z.x += (dx / distToPlayer) * speed * dt;
@@ -1157,7 +1222,11 @@
         z.attackCooldown = Math.max(0, (z.attackCooldown || 0) - dt);
       });
 
-      zombies = zombies.filter((z) => z.hp > 0);
+      zombies = zombies.filter((z) => {
+        if (z.hp > 0) return true;
+        if (z.mesh) scene.remove(z.mesh);
+        return false;
+      });
     }
 
     function updateTurrets(dt) {
@@ -1194,7 +1263,11 @@
           m.armed = false;
         }
       });
-      mines = mines.filter((m) => m.armed);
+      mines = mines.filter((m) => {
+        if (m.armed) return true;
+        if (m.mesh) scene.remove(m.mesh);
+        return false;
+      });
     }
 
     function updateBullets(dt) {
@@ -1219,7 +1292,11 @@
           }
         }
       });
-      bullets = bullets.filter((b) => !b.hit && Math.abs(b.x - player.x) < 1500 && Math.abs(b.y - player.y) < 1500);
+      bullets = bullets.filter((b) => {
+        const keep = !b.hit && Math.abs(b.x - player.x) < 1500 && Math.abs(b.y - player.y) < 1500;
+        if (!keep && b.mesh) scene.remove(b.mesh);
+        return keep;
+      });
     }
 
     function updateStructures(dt) {
@@ -1277,7 +1354,10 @@
         return;
       }
       spendResources(cost);
-      zombies.forEach((z) => (z.hp = 0));
+      zombies.forEach((z) => {
+        z.hp = 0;
+        if (z.mesh) scene.remove(z.mesh);
+      });
       zombies = [];
       spawnQueue = [];
       waveState = "break";
@@ -1362,22 +1442,26 @@
         for (let i = 0; i < player.weapon.pellets; i += 1) {
           const spread = (Math.random() - 0.5) * 0.35;
           const angle = Math.atan2(player.aim.y, player.aim.x) + spread;
-          bullets.push({
+          const bullet = {
             x: player.x,
             y: player.y,
             vx: Math.cos(angle) * 420,
             vy: Math.sin(angle) * 420,
             damage: player.weapon.damage
-          });
+          };
+          bullet.mesh = createBulletMesh(bullet, false);
+          bullets.push(bullet);
         }
       } else {
-        bullets.push({
+        const bullet = {
           x: player.x,
           y: player.y,
           vx: player.aim.x * 440,
           vy: player.aim.y * 440,
           damage: player.weapon.damage
-        });
+        };
+        bullet.mesh = createBulletMesh(bullet, false);
+        bullets.push(bullet);
       }
     }
 
@@ -1388,124 +1472,94 @@
     function distBetween(a, b) {
       return Math.hypot(a.x - b.x, a.y - b.y);
     }
-
-    function project(worldX, worldY, worldZ = 0) {
-      const screenX = (worldX - CAMERA.x) + canvas.width / 2;
-      const screenY = (worldY - CAMERA.y) * TILT + canvas.height / 2 - worldZ;
-      return { x: screenX, y: screenY };
+    function createBoxMesh({ width, height, depth, color }) {
+      const geometry = new THREE.BoxGeometry(width, height, depth);
+      const material = new THREE.MeshStandardMaterial({ color });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.height = height;
+      return mesh;
     }
 
-    function drawGround() {
-      ctx.fillStyle = "#11182a";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = "rgba(255,255,255,0.05)";
-      ctx.lineWidth = 1;
-      const step = 120;
-      for (let x = -WORLD_SIZE; x <= WORLD_SIZE; x += step) {
-        const p1 = project(x, -WORLD_SIZE);
-        const p2 = project(x, WORLD_SIZE);
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-      }
-      for (let y = -WORLD_SIZE; y <= WORLD_SIZE; y += step) {
-        const p1 = project(-WORLD_SIZE, y);
-        const p2 = project(WORLD_SIZE, y);
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-      }
+    function createZombieMesh(zombie) {
+      const color = zombie.type === "boss" ? 0xff5f5f : parseInt(zombieTypes[zombie.type]?.color?.replace("#", "0x") || "0xcccccc", 16);
+      const size = zombie.size * 1.4;
+      const mesh = createBoxMesh({ width: size, height: size * 1.6, depth: size, color });
+      scene.add(mesh);
+      return mesh;
     }
 
-    function drawEntity(entity, color, size, label, height = size * 1.2) {
-      const pos = project(entity.x, entity.y, height);
-      ctx.fillStyle = "rgba(0,0,0,0.35)";
-      ctx.beginPath();
-      ctx.ellipse(pos.x, pos.y + height + size * 0.4, size * 0.9, size * 0.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(0,0,0,0.25)";
-      ctx.fillRect(pos.x - size * 0.6, pos.y + size * 0.2, size * 1.2, height);
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y - size * 0.2, size, 0, Math.PI * 2);
-      ctx.fill();
-      if (label) {
-        ctx.fillStyle = "rgba(255,255,255,0.7)";
-        ctx.font = "12px sans-serif";
-        ctx.fillText(label, pos.x - size, pos.y - size * 1.8);
-      }
+    function createStructureMesh(structure) {
+      const color = structure.type === "barricade" ? parseInt(structure.color.replace("#", "0x"), 16) : structure.type === "medstation" ? 0x5df2a6 : 0xd1c56f;
+      const mesh = createBoxMesh({ width: 32, height: structure.height || 20, depth: 20, color });
+      scene.add(mesh);
+      return mesh;
     }
 
-    function drawBox(x, y, width, depth, height, color) {
-      const pos = project(x, y, height);
-      ctx.fillStyle = "rgba(0,0,0,0.35)";
-      ctx.beginPath();
-      ctx.ellipse(pos.x, pos.y + height + depth * 0.2, width * 0.7, depth * 0.3, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(0,0,0,0.25)";
-      ctx.fillRect(pos.x - width / 2, pos.y + depth * 0.15, width, height);
-      ctx.fillStyle = color;
-      ctx.fillRect(pos.x - width / 2, pos.y - depth / 2, width, depth);
+    function createTurretMesh(turret) {
+      const color = parseInt(turret.color.replace("#", "0x"), 16);
+      const mesh = createBoxMesh({ width: 24, height: turret.height || 30, depth: 24, color });
+      scene.add(mesh);
+      return mesh;
+    }
+
+    function createFactoryMesh(factory) {
+      const mesh = createBoxMesh({ width: 40, height: 26, depth: 28, color: 0x3f4c75 });
+      scene.add(mesh);
+      return mesh;
+    }
+
+    function createMineMesh(mine) {
+      const geometry = new THREE.CylinderGeometry(6, 6, 8, 16);
+      const material = new THREE.MeshStandardMaterial({ color: 0xffb703 });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.height = 8;
+      scene.add(mesh);
+      return mesh;
+    }
+
+    function createBulletMesh(bullet, fromZombie) {
+      const geometry = new THREE.SphereGeometry(4, 12, 12);
+      const material = new THREE.MeshStandardMaterial({ color: fromZombie ? 0xff7b7b : 0xf8f7ff });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = true;
+      mesh.userData.height = 4;
+      scene.add(mesh);
+      return mesh;
+    }
+
+    function updateMeshPosition(entity) {
+      if (!entity.mesh) return;
+      const height = entity.mesh.userData.height || 10;
+      entity.mesh.position.set(entity.x, height / 2, entity.y);
     }
 
     function render() {
-      CAMERA.x = player.x;
-      CAMERA.y = player.y;
-      drawGround();
+      camera.position.x = player.x;
+      camera.position.z = player.y + 900;
+      camera.lookAt(player.x, 0, player.y);
 
-      effects.forEach((e) => {
-        if (e.type === "juice") {
-          const pos = project(e.x, e.y);
-          ctx.fillStyle = "rgba(0, 200, 255, 0.2)";
-          ctx.beginPath();
-          ctx.ellipse(pos.x, pos.y, e.radius, e.radius * TILT, 0, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      });
-
-      structures.forEach((s) => {
-        const color = s.type === "barricade" ? s.color : s.type === "medstation" ? "#5df2a6" : "#d1c56f";
-        drawBox(s.x, s.y, 32, 20, s.height || 18, color);
-      });
-
-      factories.forEach((f) => {
-        drawBox(f.x, f.y, 36, 22, 24, "#3f4c75");
-      });
-
-      turrets.forEach((t) => {
-        drawBox(t.x, t.y, 22, 22, t.height || 30, t.color || "#8fd3ff");
-      });
-
-      mines.forEach((m) => {
-        const pos = project(m.x, m.y);
-        ctx.fillStyle = "#ffb703";
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
+      updateMeshPosition(player);
       zombies.forEach((z) => {
-        const alpha = z.stealth && distBetween(z, player) > 120 ? 0.3 : 1;
-        ctx.globalAlpha = alpha;
-        if (z.type === "boss") {
-          drawEntity(z, "#ff5f5f", z.size, "Босс", z.size * 2);
-        } else {
-          drawEntity(z, zombieTypes[z.type]?.color || "#ccc", z.size, null, z.size * 1.4);
+        if (z.mesh && z.stealth && distBetween(z, player) > 120) {
+          z.mesh.material.transparent = true;
+          z.mesh.material.opacity = 0.35;
+        } else if (z.mesh) {
+          z.mesh.material.transparent = false;
+          z.mesh.material.opacity = 1;
         }
-        ctx.globalAlpha = 1;
+        updateMeshPosition(z);
       });
+      structures.forEach(updateMeshPosition);
+      turrets.forEach(updateMeshPosition);
+      factories.forEach(updateMeshPosition);
+      mines.forEach(updateMeshPosition);
+      bullets.forEach(updateMeshPosition);
 
-      drawEntity(player, player.invincible > 0 ? "#43d17c" : "#4aa3ff", 18, player.character.name, 26);
-
-      bullets.forEach((b) => {
-        const pos = project(b.x, b.y);
-        ctx.fillStyle = b.fromZombie ? "#ff7b7b" : "#f8f7ff";
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 3, 0, Math.PI * 2);
-        ctx.fill();
-      });
+      renderer.render(scene, camera);
     }
 
     function loop(timestamp) {
@@ -1592,6 +1646,7 @@
     attachJoystick(joyRight, "aim");
 
     setupCharacters();
+    initThree();
     resizeCanvas();
   </script>
 </body>
