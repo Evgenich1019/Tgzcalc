@@ -541,6 +541,7 @@
     let waveState = "spawning";
     let spawnQueue = [];
     let lastTime = 0;
+    let timeElapsed = 0;
     let mouse = { x: 0, y: 0, down: false };
     let keys = {};
     let isTouch = false;
@@ -700,14 +701,14 @@
       scene.add(dir);
 
       const planeGeom = new THREE.PlaneGeometry(4000, 4000);
-      const planeMat = new THREE.MeshStandardMaterial({ color: 0x11182a });
+      const planeMat = new THREE.MeshStandardMaterial({ map: createGroundTexture() });
       ground = new THREE.Mesh(planeGeom, planeMat);
       ground.rotation.x = -Math.PI / 2;
       ground.receiveShadow = true;
       scene.add(ground);
 
-      const grid = new THREE.GridHelper(4000, 40, 0x1b2340, 0x151d33);
-      scene.add(grid);
+      const sky = createSkyDome();
+      scene.add(sky);
     }
 
     function syncPanels() {
@@ -1224,6 +1225,7 @@
 
       zombies = zombies.filter((z) => {
         if (z.hp > 0) return true;
+        spawnHitParticles(z.x, z.y, 0x8bdc65);
         if (z.mesh) scene.remove(z.mesh);
         return false;
       });
@@ -1236,14 +1238,16 @@
           const target = zombies.find((z) => distBetween(z, t) < t.range);
           if (target) {
             const angle = Math.atan2(target.y - t.y, target.x - t.x);
-            bullets.push({
+            const bullet = {
               x: t.x,
               y: t.y,
               vx: Math.cos(angle) * 360,
               vy: Math.sin(angle) * 360,
               damage: t.damage,
               fromZombie: false
-            });
+            };
+            bullet.mesh = createBulletMesh(bullet, false);
+            bullets.push(bullet);
             t.fire = t.rate;
           }
         }
@@ -1313,8 +1317,23 @@
     }
 
     function updateEffects(dt) {
-      effects.forEach((e) => (e.time -= dt));
-      effects = effects.filter((e) => e.time > 0);
+      effects.forEach((e) => {
+        e.time -= dt;
+        if (e.type === "particles") {
+          e.particles.forEach((p) => {
+            p.velocity.y -= 0.5 * dt;
+            p.mesh.position.addScaledVector(p.velocity, dt * 60);
+            p.mesh.material.opacity = Math.max(0, e.time / e.duration);
+          });
+        }
+      });
+      effects = effects.filter((e) => {
+        if (e.time > 0) return true;
+        if (e.type === "particles") {
+          e.particles.forEach((p) => scene.remove(p.mesh));
+        }
+        return false;
+      });
     }
 
     function updateWave(dt) {
@@ -1392,6 +1411,7 @@
         }
       });
       z.hp = 0;
+      spawnHitParticles(z.x, z.y, 0xff6b6b);
     }
 
     function updatePlayer(dt) {
@@ -1472,6 +1492,93 @@
     function distBetween(a, b) {
       return Math.hypot(a.x - b.x, a.y - b.y);
     }
+
+    function createGroundTexture() {
+      const size = 512;
+      const canvasTex = document.createElement("canvas");
+      canvasTex.width = size;
+      canvasTex.height = size;
+      const ctxTex = canvasTex.getContext("2d");
+      ctxTex.fillStyle = "#131b2e";
+      ctxTex.fillRect(0, 0, size, size);
+      ctxTex.strokeStyle = "rgba(66, 90, 140, 0.3)";
+      ctxTex.lineWidth = 2;
+      for (let i = 0; i <= size; i += 64) {
+        ctxTex.beginPath();
+        ctxTex.moveTo(i, 0);
+        ctxTex.lineTo(i, size);
+        ctxTex.stroke();
+        ctxTex.beginPath();
+        ctxTex.moveTo(0, i);
+        ctxTex.lineTo(size, i);
+        ctxTex.stroke();
+      }
+      ctxTex.fillStyle = "rgba(255, 255, 255, 0.04)";
+      for (let i = 0; i < 200; i += 1) {
+        ctxTex.beginPath();
+        ctxTex.arc(Math.random() * size, Math.random() * size, Math.random() * 3 + 1, 0, Math.PI * 2);
+        ctxTex.fill();
+      }
+      const texture = new THREE.CanvasTexture(canvasTex);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(8, 8);
+      return texture;
+    }
+
+    function createSkyDome() {
+      const geometry = new THREE.SphereGeometry(2500, 32, 32);
+      const material = new THREE.MeshBasicMaterial({
+        side: THREE.BackSide,
+        map: createSkyTexture()
+      });
+      const dome = new THREE.Mesh(geometry, material);
+      return dome;
+    }
+
+    function createSkyTexture() {
+      const size = 512;
+      const canvasTex = document.createElement("canvas");
+      canvasTex.width = size;
+      canvasTex.height = size;
+      const ctxTex = canvasTex.getContext("2d");
+      const gradient = ctxTex.createLinearGradient(0, 0, 0, size);
+      gradient.addColorStop(0, "#7cc6ff");
+      gradient.addColorStop(0.5, "#cfe9ff");
+      gradient.addColorStop(1, "#f9fbff");
+      ctxTex.fillStyle = gradient;
+      ctxTex.fillRect(0, 0, size, size);
+      ctxTex.fillStyle = "rgba(255,255,255,0.6)";
+      for (let i = 0; i < 20; i += 1) {
+        const x = Math.random() * size;
+        const y = Math.random() * size * 0.6;
+        const radius = 30 + Math.random() * 60;
+        ctxTex.beginPath();
+        ctxTex.arc(x, y, radius, 0, Math.PI * 2);
+        ctxTex.fill();
+        ctxTex.beginPath();
+        ctxTex.arc(x + radius * 0.6, y + radius * 0.1, radius * 0.8, 0, Math.PI * 2);
+        ctxTex.fill();
+      }
+      return new THREE.CanvasTexture(canvasTex);
+    }
+
+    function spawnHitParticles(x, y, color) {
+      const particles = [];
+      for (let i = 0; i < 8; i += 1) {
+        const geometry = new THREE.SphereGeometry(2.5, 8, 8);
+        const material = new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.9 });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(x, 6, y);
+        scene.add(mesh);
+        particles.push({
+          mesh,
+          velocity: new THREE.Vector3((Math.random() - 0.5) * 0.6, Math.random() * 0.6 + 0.2, (Math.random() - 0.5) * 0.6)
+        });
+      }
+      effects.push({ type: "particles", time: 0.6, duration: 0.6, particles });
+    }
+
     function createBoxMesh({ width, height, depth, color }) {
       const geometry = new THREE.BoxGeometry(width, height, depth);
       const material = new THREE.MeshStandardMaterial({ color });
@@ -1484,10 +1591,31 @@
 
     function createZombieMesh(zombie) {
       const color = zombie.type === "boss" ? 0xff5f5f : parseInt(zombieTypes[zombie.type]?.color?.replace("#", "0x") || "0xcccccc", 16);
-      const size = zombie.size * 1.4;
-      const mesh = createBoxMesh({ width: size, height: size * 1.6, depth: size, color });
-      scene.add(mesh);
-      return mesh;
+      const size = zombie.size * 1.2;
+      const group = new THREE.Group();
+      const body = createBoxMesh({ width: size, height: size * 1.4, depth: size * 0.8, color });
+      body.position.y = size * 0.7;
+      const headGeom = new THREE.SphereGeometry(size * 0.35, 16, 16);
+      const headMat = new THREE.MeshStandardMaterial({ color: 0xf2f5f7 });
+      const head = new THREE.Mesh(headGeom, headMat);
+      head.position.set(0, size * 1.5, size * 0.1);
+      head.castShadow = true;
+      const armGeom = new THREE.CylinderGeometry(size * 0.12, size * 0.14, size * 0.9, 8);
+      const armMat = new THREE.MeshStandardMaterial({ color: 0x7b8caa });
+      const leftArm = new THREE.Mesh(armGeom, armMat);
+      leftArm.position.set(-size * 0.55, size * 0.9, 0);
+      leftArm.rotation.z = Math.PI / 2;
+      const rightArm = new THREE.Mesh(armGeom, armMat);
+      rightArm.position.set(size * 0.55, size * 0.9, 0);
+      rightArm.rotation.z = -Math.PI / 2;
+      leftArm.castShadow = true;
+      rightArm.castShadow = true;
+
+      group.add(body, head, leftArm, rightArm);
+      group.userData.height = size * 1.6;
+      group.userData.animate = { leftArm, rightArm, baseY: size * 0.7 };
+      scene.add(group);
+      return group;
     }
 
     function createStructureMesh(structure) {
@@ -1534,7 +1662,8 @@
     function updateMeshPosition(entity) {
       if (!entity.mesh) return;
       const height = entity.mesh.userData.height || 10;
-      entity.mesh.position.set(entity.x, height / 2, entity.y);
+      const offsetY = entity.mesh.userData.offsetY || 0;
+      entity.mesh.position.set(entity.x, height / 2 + offsetY, entity.y);
     }
 
     function render() {
@@ -1545,11 +1674,25 @@
       updateMeshPosition(player);
       zombies.forEach((z) => {
         if (z.mesh && z.stealth && distBetween(z, player) > 120) {
-          z.mesh.material.transparent = true;
-          z.mesh.material.opacity = 0.35;
+          z.mesh.traverse((child) => {
+            if (child.material) {
+              child.material.transparent = true;
+              child.material.opacity = 0.35;
+            }
+          });
         } else if (z.mesh) {
-          z.mesh.material.transparent = false;
-          z.mesh.material.opacity = 1;
+          z.mesh.traverse((child) => {
+            if (child.material) {
+              child.material.transparent = false;
+              child.material.opacity = 1;
+            }
+          });
+        }
+        if (z.mesh?.userData?.animate) {
+          const sway = Math.sin(timeElapsed * 4 + z.x * 0.01) * 0.6;
+          z.mesh.userData.animate.leftArm.rotation.y = sway;
+          z.mesh.userData.animate.rightArm.rotation.y = -sway;
+          z.mesh.userData.offsetY = Math.sin(timeElapsed * 3 + z.y * 0.02) * 1.5;
         }
         updateMeshPosition(z);
       });
@@ -1565,6 +1708,7 @@
     function loop(timestamp) {
       const dt = Math.min(0.03, (timestamp - lastTime) / 1000);
       lastTime = timestamp;
+      timeElapsed += dt;
       if (gameState !== "playing") return;
       updatePlayer(dt);
       updateAbilities(dt);
