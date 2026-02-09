@@ -142,6 +142,11 @@
       border: 1px solid rgba(255, 255, 255, 0.2);
     }
 
+    button.small {
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+
     .char-grid {
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       margin-top: 20px;
@@ -188,6 +193,24 @@
       padding: 10px 12px;
       min-width: 210px;
       pointer-events: auto;
+    }
+
+    .hud-panel.control-panel button {
+      width: 100%;
+    }
+
+    .hud-panel.collapsible {
+      transition: opacity 0.2s ease;
+    }
+
+    .hud-panel.hidden {
+      opacity: 0;
+      pointer-events: none;
+      height: 0;
+      overflow: hidden;
+      padding: 0;
+      margin: 0;
+      border: 0;
     }
 
     .hud-panel h4 {
@@ -346,6 +369,14 @@
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       }
 
+      .hud-panel.collapsible {
+        display: none;
+      }
+
+      .hud-panel.collapsible.open {
+        display: block;
+      }
+
       .joysticks {
         display: block;
       }
@@ -369,6 +400,12 @@
             <div class="progress"><span id="hp-bar"></span></div>
             <div class="small" id="wave-info"></div>
           </div>
+          <div class="hud-panel control-panel">
+            <h4>Меню</h4>
+            <button class="small" id="toggle-build">Постройки</button>
+            <button class="small" id="toggle-shop">Оружие</button>
+            <button class="small ghost" id="skip-wave">Скип волны</button>
+          </div>
           <div class="hud-panel" id="resource-panel">
             <h4>Ресурсы</h4>
             <div class="stats" id="resources"></div>
@@ -379,12 +416,12 @@
             <div class="small">Босс на 21 волне • перерыв 60 сек</div>
           </div>
         </div>
-        <div class="hud-bottom">
-          <div class="hud-panel">
+      <div class="hud-bottom">
+          <div class="hud-panel collapsible" id="build-panel">
             <h4>Постройки/Заводы</h4>
             <div class="build-panel" id="build-buttons"></div>
           </div>
-          <div class="hud-panel">
+          <div class="hud-panel collapsible" id="shop-panel">
             <h4>Оружейка</h4>
             <div class="shop-panel" id="shop-buttons"></div>
           </div>
@@ -476,6 +513,11 @@
     const buildButtons = document.getElementById("build-buttons");
     const shopButtons = document.getElementById("shop-buttons");
     const abilityButtons = document.getElementById("ability-buttons");
+    const buildPanel = document.getElementById("build-panel");
+    const shopPanel = document.getElementById("shop-panel");
+    const toggleBuildButton = document.getElementById("toggle-build");
+    const toggleShopButton = document.getElementById("toggle-shop");
+    const skipWaveButton = document.getElementById("skip-wave");
     const joysticks = document.getElementById("joysticks");
     const joyLeft = document.getElementById("joy-left");
     const joyRight = document.getElementById("joy-right");
@@ -550,29 +592,49 @@
     };
 
     const buildOptions = [
-      { id: "barricade", label: "Баррикада (дерево)", cost: { wood: 25, coins: 20 } },
-      { id: "turret", label: "Турель", cost: { iron: 15, coins: 45 } },
-      { id: "mine", label: "Мина", cost: { stone: 10, coins: 15 } },
-      { id: "medstation", label: "Мед-станция", cost: { wood: 20, coins: 30 } },
-      { id: "ammobox", label: "Патронница", cost: { wood: 15, coins: 25 } },
-      { id: "lumber", label: "Лесопилка", cost: { coins: 40 } },
-      { id: "quarry", label: "Каменоломня", cost: { wood: 10, coins: 50 } },
-      { id: "smelter", label: "Плавильня", cost: { stone: 15, coins: 70 } },
-      { id: "factory", label: "Фабрика титана", cost: { iron: 15, coins: 90 } },
-      { id: "diamond", label: "Карьер алмазов", cost: { titan: 10, coins: 120 } }
+      { id: "barricade-wood", kind: "barricade", level: "wood", label: "Баррикада (дерево)", cost: { wood: 30, coins: 10 } },
+      { id: "barricade-stone", kind: "barricade", level: "stone", label: "Баррикада (камень)", cost: { wood: 10, stone: 35, coins: 15 } },
+      { id: "barricade-iron", kind: "barricade", level: "iron", label: "Баррикада (железо)", cost: { stone: 15, iron: 20, coins: 22 } },
+      { id: "barricade-titan", kind: "barricade", level: "titan", label: "Баррикада (титан)", cost: { iron: 15, titan: 12, coins: 30 } },
+      { id: "turret-wood", kind: "turret", level: "wood", label: "Турель (дерево)", cost: { wood: 40, coins: 20 } },
+      { id: "turret-stone", kind: "turret", level: "stone", label: "Турель (камень)", cost: { wood: 10, stone: 30, coins: 28 } },
+      { id: "turret-iron", kind: "turret", level: "iron", label: "Турель (железо)", cost: { stone: 12, iron: 24, coins: 36 } },
+      { id: "turret-titan", kind: "turret", level: "titan", label: "Турель (титан)", cost: { iron: 12, titan: 14, coins: 46 } },
+      { id: "mine", kind: "mine", label: "Мина", cost: { stone: 12, coins: 12 } },
+      { id: "medstation", kind: "medstation", label: "Мед-станция", cost: { wood: 15, iron: 8, coins: 24 } },
+      { id: "ammobox", kind: "ammobox", label: "Патронница", cost: { wood: 12, stone: 6, coins: 20 } },
+      { id: "lumber", kind: "factory", label: "Лесопилка", cost: { stone: 6, coins: 40 } },
+      { id: "quarry", kind: "factory", label: "Каменоломня", cost: { wood: 14, coins: 50 } },
+      { id: "smelter", kind: "factory", label: "Плавильня", cost: { stone: 20, coins: 70 } },
+      { id: "factory", kind: "factory", label: "Фабрика титана", cost: { iron: 20, coins: 90 } },
+      { id: "diamond", kind: "factory", label: "Карьер алмазов", cost: { titan: 10, coins: 120 } }
     ];
 
     const weaponOptions = [
       { id: "pistol", label: "Пистолет (∞)", cost: null, damage: 12, rate: 0.35, ammo: Infinity },
-      { id: "smg", label: "ПП (купить)", cost: { wood: 20, coins: 35 }, damage: 10, rate: 0.18, ammo: 160 },
-      { id: "rifle", label: "Винтовка", cost: { iron: 10, coins: 60 }, damage: 18, rate: 0.4, ammo: 80 },
-      { id: "shotgun", label: "Дробовик", cost: { stone: 20, coins: 70 }, damage: 9, rate: 0.65, ammo: 60, pellets: 5 }
+      { id: "smg", label: "ПП (купить)", cost: { wood: 16, iron: 4, coins: 35 }, damage: 10, rate: 0.18, ammo: 160 },
+      { id: "rifle", label: "Винтовка", cost: { iron: 12, stone: 8, coins: 60 }, damage: 18, rate: 0.4, ammo: 80 },
+      { id: "shotgun", label: "Дробовик", cost: { stone: 18, wood: 8, coins: 70 }, damage: 9, rate: 0.65, ammo: 60, pellets: 5 }
     ];
 
     const ammoPrices = {
-      smg: { coins: 20, ammo: 60 },
-      rifle: { coins: 30, ammo: 30 },
-      shotgun: { coins: 25, ammo: 20 }
+      smg: { coins: 20, iron: 2, ammo: 60 },
+      rifle: { coins: 30, iron: 4, ammo: 30 },
+      shotgun: { coins: 25, wood: 4, ammo: 20 }
+    };
+
+    const BARRICADE_LEVELS = {
+      wood: { maxHp: 140, color: "#caa472", height: 16 },
+      stone: { maxHp: 200, color: "#9fa4ad", height: 20 },
+      iron: { maxHp: 260, color: "#8fb0c8", height: 24 },
+      titan: { maxHp: 320, color: "#c9a4ff", height: 28 }
+    };
+
+    const TURRET_LEVELS = {
+      wood: { damage: 10, rate: 0.7, range: 220, color: "#caa472", height: 26 },
+      stone: { damage: 14, rate: 0.6, range: 250, color: "#9fa4ad", height: 30 },
+      iron: { damage: 18, rate: 0.5, range: 300, color: "#8fb0c8", height: 34 },
+      titan: { damage: 24, rate: 0.4, range: 340, color: "#c9a4ff", height: 40 }
     };
 
     function setupCharacters() {
@@ -609,6 +671,17 @@
       canvas.width = width * devicePixelRatio;
       canvas.height = height * devicePixelRatio;
       ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      syncPanels();
+    }
+
+    function syncPanels() {
+      if (window.innerWidth > 900) {
+        buildPanel.classList.add("open");
+        shopPanel.classList.add("open");
+      } else {
+        buildPanel.classList.remove("open");
+        shopPanel.classList.remove("open");
+      }
     }
 
     window.addEventListener("resize", resizeCanvas);
@@ -633,6 +706,18 @@
       gameState = "menu";
     });
 
+    toggleBuildButton.addEventListener("click", () => {
+      buildPanel.classList.toggle("open");
+    });
+
+    toggleShopButton.addEventListener("click", () => {
+      shopPanel.classList.toggle("open");
+    });
+
+    skipWaveButton.addEventListener("click", () => {
+      skipCurrentWave();
+    });
+
     function showToast(text) {
       toast.textContent = text;
       toast.classList.add("show");
@@ -641,12 +726,12 @@
 
     function initResources() {
       resources = {
-        wood: 40,
-        stone: 20,
-        iron: 0,
+        wood: 60,
+        stone: 40,
+        iron: 12,
         titan: 0,
         diamond: 0,
-        coins: 120,
+        coins: 140,
         gems: 0
       };
     }
@@ -760,21 +845,43 @@
       spendResources(option.cost);
       const placeX = player.x + player.aim.x * 60;
       const placeY = player.y + player.aim.y * 60;
-      if (["lumber", "quarry", "smelter", "factory", "diamond"].includes(option.id)) {
+      if (option.kind === "factory") {
         factories.push({ id: option.id, x: placeX, y: placeY, timer: 0 });
         showToast(`Построен ${option.label}`);
         return;
       }
-      if (option.id === "turret") {
-        turrets.push({ x: placeX, y: placeY, fire: 0, hp: 120, level: "iron" });
-      } else if (option.id === "mine") {
+      if (option.kind === "turret") {
+        const stats = TURRET_LEVELS[option.level];
+        turrets.push({
+          x: placeX,
+          y: placeY,
+          fire: 0,
+          hp: 120 + stats.damage * 4,
+          level: option.level,
+          damage: stats.damage,
+          rate: stats.rate,
+          range: stats.range,
+          height: stats.height,
+          color: stats.color
+        });
+      } else if (option.kind === "mine") {
         mines.push({ x: placeX, y: placeY, radius: 36, armed: true });
-      } else if (option.id === "medstation") {
-        structures.push({ type: "medstation", x: placeX, y: placeY, hp: 100, maxHp: 100 });
-      } else if (option.id === "ammobox") {
-        structures.push({ type: "ammobox", x: placeX, y: placeY, hp: 90, maxHp: 90 });
+      } else if (option.kind === "medstation") {
+        structures.push({ type: "medstation", x: placeX, y: placeY, hp: 110, maxHp: 110, height: 24 });
+      } else if (option.kind === "ammobox") {
+        structures.push({ type: "ammobox", x: placeX, y: placeY, hp: 100, maxHp: 100, height: 20 });
       } else {
-        structures.push({ type: "barricade", level: "wood", x: placeX, y: placeY, hp: 140, maxHp: 140 });
+        const stats = BARRICADE_LEVELS[option.level];
+        structures.push({
+          type: "barricade",
+          level: option.level,
+          x: placeX,
+          y: placeY,
+          hp: stats.maxHp,
+          maxHp: stats.maxHp,
+          height: stats.height,
+          color: stats.color
+        });
       }
       showToast(`Постройка: ${option.label}`);
     }
@@ -800,11 +907,11 @@
     function buyAmmo(id) {
       const data = ammoPrices[id];
       if (!data) return;
-      if (!canAfford({ coins: data.coins })) {
-        showToast("Мало монет");
+      if (!canAfford(data)) {
+        showToast("Не хватает ресурсов");
         return;
       }
-      spendResources({ coins: data.coins });
+      spendResources(data);
       player.ammo[id] = (player.ammo[id] || 0) + data.ammo;
       showToast(`Патроны для ${id.toUpperCase()} пополнены`);
     }
@@ -1057,7 +1164,7 @@
       turrets.forEach((t) => {
         t.fire -= dt;
         if (t.fire <= 0) {
-          const target = zombies.find((z) => distBetween(z, t) < 320);
+          const target = zombies.find((z) => distBetween(z, t) < t.range);
           if (target) {
             const angle = Math.atan2(target.y - t.y, target.x - t.x);
             bullets.push({
@@ -1065,10 +1172,10 @@
               y: t.y,
               vx: Math.cos(angle) * 360,
               vy: Math.sin(angle) * 360,
-              damage: 16,
+              damage: t.damage,
               fromZombie: false
             });
-            t.fire = 0.4;
+            t.fire = t.rate;
           }
         }
       });
@@ -1160,6 +1267,22 @@
           spawnWave(currentWave);
         }
       }
+    }
+
+    function skipCurrentWave() {
+      if (gameState !== "playing") return;
+      const cost = { coins: 25 };
+      if (!canAfford(cost)) {
+        showToast("Нужно 25 монет для скипа");
+        return;
+      }
+      spendResources(cost);
+      zombies.forEach((z) => (z.hp = 0));
+      zombies = [];
+      spawnQueue = [];
+      waveState = "break";
+      waveTimer = 3;
+      showToast("Волна пропущена");
     }
 
     function applyDamage(amount) {
@@ -1266,9 +1389,9 @@
       return Math.hypot(a.x - b.x, a.y - b.y);
     }
 
-    function project(worldX, worldY) {
+    function project(worldX, worldY, worldZ = 0) {
       const screenX = (worldX - CAMERA.x) + canvas.width / 2;
-      const screenY = (worldY - CAMERA.y) * TILT + canvas.height / 2;
+      const screenY = (worldY - CAMERA.y) * TILT + canvas.height / 2 - worldZ;
       return { x: screenX, y: screenY };
     }
 
@@ -1296,12 +1419,14 @@
       }
     }
 
-    function drawEntity(entity, color, size, label) {
-      const pos = project(entity.x, entity.y);
+    function drawEntity(entity, color, size, label, height = size * 1.2) {
+      const pos = project(entity.x, entity.y, height);
       ctx.fillStyle = "rgba(0,0,0,0.35)";
       ctx.beginPath();
-      ctx.ellipse(pos.x, pos.y + size * 0.4, size * 0.9, size * 0.5, 0, 0, Math.PI * 2);
+      ctx.ellipse(pos.x, pos.y + height + size * 0.4, size * 0.9, size * 0.5, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      ctx.fillRect(pos.x - size * 0.6, pos.y + size * 0.2, size * 1.2, height);
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(pos.x, pos.y - size * 0.2, size, 0, Math.PI * 2);
@@ -1311,6 +1436,18 @@
         ctx.font = "12px sans-serif";
         ctx.fillText(label, pos.x - size, pos.y - size * 1.8);
       }
+    }
+
+    function drawBox(x, y, width, depth, height, color) {
+      const pos = project(x, y, height);
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.beginPath();
+      ctx.ellipse(pos.x, pos.y + height + depth * 0.2, width * 0.7, depth * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      ctx.fillRect(pos.x - width / 2, pos.y + depth * 0.15, width, height);
+      ctx.fillStyle = color;
+      ctx.fillRect(pos.x - width / 2, pos.y - depth / 2, width, depth);
     }
 
     function render() {
@@ -1329,21 +1466,16 @@
       });
 
       structures.forEach((s) => {
-        const pos = project(s.x, s.y);
-        ctx.fillStyle = s.type === "barricade" ? "#caa472" : s.type === "medstation" ? "#5df2a6" : "#d1c56f";
-        ctx.fillRect(pos.x - 16, pos.y - 16, 32, 20);
+        const color = s.type === "barricade" ? s.color : s.type === "medstation" ? "#5df2a6" : "#d1c56f";
+        drawBox(s.x, s.y, 32, 20, s.height || 18, color);
       });
 
       factories.forEach((f) => {
-        const pos = project(f.x, f.y);
-        ctx.fillStyle = "#3f4c75";
-        ctx.fillRect(pos.x - 18, pos.y - 18, 36, 22);
+        drawBox(f.x, f.y, 36, 22, 24, "#3f4c75");
       });
 
       turrets.forEach((t) => {
-        const pos = project(t.x, t.y);
-        ctx.fillStyle = "#8fd3ff";
-        ctx.fillRect(pos.x - 10, pos.y - 18, 20, 26);
+        drawBox(t.x, t.y, 22, 22, t.height || 30, t.color || "#8fd3ff");
       });
 
       mines.forEach((m) => {
@@ -1358,14 +1490,14 @@
         const alpha = z.stealth && distBetween(z, player) > 120 ? 0.3 : 1;
         ctx.globalAlpha = alpha;
         if (z.type === "boss") {
-          drawEntity(z, "#ff5f5f", z.size, "Босс");
+          drawEntity(z, "#ff5f5f", z.size, "Босс", z.size * 2);
         } else {
-          drawEntity(z, zombieTypes[z.type]?.color || "#ccc", z.size);
+          drawEntity(z, zombieTypes[z.type]?.color || "#ccc", z.size, null, z.size * 1.4);
         }
         ctx.globalAlpha = 1;
       });
 
-      drawEntity(player, player.invincible > 0 ? "#43d17c" : "#4aa3ff", 18, player.character.name);
+      drawEntity(player, player.invincible > 0 ? "#43d17c" : "#4aa3ff", 18, player.character.name, 26);
 
       bullets.forEach((b) => {
         const pos = project(b.x, b.y);
